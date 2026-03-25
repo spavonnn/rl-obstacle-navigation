@@ -55,3 +55,113 @@ Example:
 
 ```python
 obs = [distance_to_goal, relative_angle, front, left, right]
+
+```
+
+## Action Space
+
+The agent outputs continuous control commands:
+
+- Linear Velocity
+- Angular Velocity
+
+These actions are applied to the robot through ROS2 velocity commands.
+
+## Reward Design
+The reward function encourages safe and efficient navigation:
+
+- Positive reward for moving toward the goal
+- Penalty for proximity to obstacles
+- Penalty for collisions
+- Reward for reaching the goal
+
+This design implements smooth motion, goal-directed behavior, and safe obstacle avoidance.
+
+## Project Structure
+```
+rl-obstacle-navigation/
+├── turtlebot_rl_env/
+│   ├── __init__.py
+│   └── turtlebot_gym_env.py    # Main RL environment
+│
+├── scripts/
+│   └── test_env.py             # Test script for environment
+│
+├── resource/
+├── test/
+├── package.xml
+├── setup.py
+├── setup.cfg
+└── .gitignore
+
+```
+---
+
+## How To Run
+## 1. Build the ROS2 workspace
+
+```bash
+cd ~/rl_ws
+colcon build
+source install/setup.bash
+```
+---
+
+## 2. Launch the simulation
+Start your TurtleBot Gazebo simulation environment.
+
+---
+## 3. Run the environment test
+
+```bash
+cd ~/rl_ws/src/turtlebot_rl_env
+python3 scripts/test_env.py
+```
+This will: 
+- Initialize the environment
+- Execute actions
+- Print observations, rewards, and termination conditions
+
+---
+
+## Current Status
+
+- RL environment implemented and functional
+- ROS2-RL interface completed
+- Observation and action spaces defined
+- Reward function designed and tested
+- Environment validated using a test script
+
+---
+
+## Future Work
+
+- Integrate PPO using Stable-Baselines3
+- Train and evaluate navigation policy
+- Evaluate performance under different obstacle configurations
+- Incorporate additional sensors (e.g., camera) for improved perception
+- Explore assistive navigation using a simple user-triggered input, with potential extension to accessible interfaces such as mouth-controlled or gesture-based signals
+
+---
+## Technologies Used
+- ROS2
+- Gazebo
+- Python
+- NumPy
+- Gymnasium concept
+- SB3
+
+---
+## Author
+
+Stephanie Pavon 
+
+NYU Tandon School of Engineering 
+
+---
+
+## Notes
+
+This project is part of a graduate-level exploration into reinforcement learning for assistive robotics, intending to reduce continuous control demands during navigation tasks. In particular, it is motivated by improving accessibility for individuals with limited dexterity, where a simple user-triggered input can initiate navigation while the robot autonomously handles low-level motion, obstacle avoidance, and path adjustment.
+
+---
