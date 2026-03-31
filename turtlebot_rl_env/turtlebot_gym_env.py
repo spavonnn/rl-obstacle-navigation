@@ -83,6 +83,10 @@ class TurtlebotGymEnv(gym.Env):
 		# previous distance for progress reward
 		self.prev_distance_to_goal = None
 
+		# step counter for max episode length truncation
+		# if robot hasn't collided or reached the goal after this many steps, end the episode to prevent wandering forever.
+		self.current_step = 0
+		self.max_steps = 500
 
 		# action space:
 		# 0 = forward
@@ -135,6 +139,9 @@ class TurtlebotGymEnv(gym.Env):
 		# saving distance for reward progress calculation
 		self.prev_distance_to_goal = observation[0]
 
+		# reset step counter at the start of every episode
+		self.current_step = 0
+
 		info = { }
 		return observation, info
 
@@ -180,7 +187,7 @@ class TurtlebotGymEnv(gym.Env):
 		distance_to_goal, relative_angle, front, left, right = observation
 
 		# thresholds
-		collision_distance = 0.05
+		collision_distance = 0.12
 		goal_distance = 0.20
 
 		# collision check
@@ -196,8 +203,12 @@ class TurtlebotGymEnv(gym.Env):
 		# episode ends if collision or goal is reached
 		terminated = bool(collision or goal_reached)
 
-		# no time-limit truncation yet
-		truncated = False
+		# increment step counter
+		self.current_step += 1
+
+		# truncate episode if max steps reached to prevent robot from wandering forever if it never collides or reaches the goal.
+		truncated = bool(self.current_step >= self.max_steps)
+
 
 		# computing reward
 		reward = self._compute_reward(
@@ -213,7 +224,8 @@ class TurtlebotGymEnv(gym.Env):
 		# extra debug info
 		info = {
 			"collision": collision,
-			"goal_reached": goal_reached
+			"goal_reached": goal_reached,
+			"step": self.current_step
 		}
 
 		return observation, reward, terminated, truncated, info
