@@ -2,10 +2,12 @@
 import gymnasium as gym
 import numpy as np
 import rclpy
+import time
 
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan
 from geometry_msgs.msg import Twist
+from std_srvs.srv import Empty 
 from tf_transformations import euler_from_quaternion
 
 
@@ -44,14 +46,35 @@ class TurtlebotGymEnv(gym.Env):
 			10
 		)
 
-		# robot pose values
+		self.reset_sim_client = self.node.create_client(
+			Empty,
+			"/reset_simulation"
+		) 
+
+		# robot pose values (in odometry frame - which starts at (0,0) at spawn) 
+		# The robot spawns at Gazebo world (-2.0, -0.5).
+		# At that moment /reset_simulation resets /odom to (0, 0)
 		self.robot_x = 0.0
 		self.robot_y = 0.0
 		self.robot_yaw = 0.0
 
-		# goal position
-		self.goal_x = 2.0
-		self.goal_y = 0.0
+		# goal position in odometry frame
+		# after /reset_simulation, odom resets to (0,0) at the spawn point,
+		# so the goal stays at a fixed offset from there
+		# world position (0.664, 1.674) converted to odom: subtract spawn offset resulting in goal at (2.664, 2.174) odometry frame
+		# odom_x = 0.664 - (-2.0) = 2.664
+		# odom_y = 1.674 - (-0.5) = 2.174
+
+		# odom = gazebo world - spawn offset
+		# gazebo world = odom + spawn offset
+
+		# spawn offset = (-2.0, -0.5)
+		# spawn/start odom frame (0,0) is at world ( -2.0, -0.5)
+		# old goal odom frame (2.0, 0) is at world (0, -0.5)
+		# current goal odom frame (2.664, 2.174) is at world (0.664, 1.674)
+
+		self.goal_x = 2.664
+		self.goal_y = 2.174
 
 		# lidar storage
 		self.lidar_ranges = None
@@ -81,18 +104,32 @@ class TurtlebotGymEnv(gym.Env):
 		# reset simulation - standard gymnasium reset
 		super().reset(seed=seed)
 
-		# stop robot at the start of episode
+		# step 1 - stop robot at the start of episode so it doesn't carry into the next episode
 		cmd = Twist()
 		cmd.linear.x = 0.0
 		cmd.angular.z = 0.0
 		self.cmd_vel_pub.publish(cmd)
 
+		# step 2 - call reset service to reset simulation and robot pose
+		self.reset_sim_client.wait_for_service(timeout_sec=5.0)
+		future = self.reset_sim_client.call_async(Empty.Request())
+		while not future.done():
+			rclpy.spin_once(self.node, timeout_sec=0.05)
+		
+		# step 3 - wait for Gazebo to finish the reset
+		time.sleep(0.5) # give Gazebo some time to reset the simulation and publish the first odometry and scan messages
+
+		# step 4 - stop again after the reset
+		self.cmd_vel_pub.publish(cmd)
+
+		# step 5 - wait for a fresh LiDAR scan from the new spawn position 
+		# to make sure _get_obs() returns real values and not old ones from before the reset.
 		# wait until at least one new scan arrives
 		self.new_scan = False
 		while not self.new_scan:
 			rclpy.spin_once(self.node, timeout_sec=0.01)
 
-		# get first real observation
+		# step 6 - get first real observation and return it
 		observation = self._get_obs()
 
 		# saving distance for reward progress calculation
@@ -109,7 +146,7 @@ class TurtlebotGymEnv(gym.Env):
 
 		# action 0 = forward
 		if action == 0:
-			cmd.linear.x = 0.2
+			cmd.linear.x = 0.3
 			cmd.angular.z = 0.0
 
 		# action 1 = turn left
@@ -143,21 +180,21 @@ class TurtlebotGymEnv(gym.Env):
 		distance_to_goal, relative_angle, front, left, right = observation
 
 		# thresholds
-		collision_distance = 0.12
+		collision_distance = 0.05
 		goal_distance = 0.20
 
 		# collision check
-		collision = (
+		collision = bool(
 			front < collision_distance or
 			left < collision_distance or
 			right < collision_distance
 		)
 
 		# check goal reached
-		goal_reached = distance_to_goal < goal_distance
+		goal_reached = bool(distance_to_goal < goal_distance)
 
 		# episode ends if collision or goal is reached
-		terminated = collision or goal_reached
+		terminated = bool(collision or goal_reached)
 
 		# no time-limit truncation yet
 		truncated = False
@@ -202,21 +239,24 @@ class TurtlebotGymEnv(gym.Env):
 		# reward progress toward goal
 		if self.prev_distance_to_goal is not None:
 			progress = self.prev_distance_to_goal - distance_to_goal
-			reward += 10.0 * progress
+			reward += 12.0 * progress
+
+		# small survival reward to encourage longer episodes and exploration
+		reward += 0.1
 
 		# small penalty every step so robot does not waste its time
-		reward -= 0.1
+		reward -= 0.05
 
 		# small penalty for doing nothing
 		if action == 3:
-			reward -= 0.05
+			reward -= 0.1
 
 		# penalty if robot is not facing the goal well
-		reward -= 0.1 * abs(relative_angle)
+		reward -= 0.05 * abs(relative_angle)
 
 		# penalty if obstacle is too close in front
 		if front < 0.30:
-			reward -= 1.0
+			reward -= 2.0
 
 		return reward
 
