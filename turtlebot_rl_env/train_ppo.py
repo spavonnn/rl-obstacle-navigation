@@ -18,7 +18,7 @@ model = PPO(
 )
 
 # train model
-model.learn(total_timesteps=50000)
+model.learn(total_timesteps=200000)
 
 # save model
 model.save("ppo_turtlebot")
