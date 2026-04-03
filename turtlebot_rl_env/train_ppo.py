@@ -20,7 +20,6 @@ checkpoint_callback = CheckpointCallback(
 # it will always pick up from latest saved model. 
 
 save_path = "ppo_turtlebot.zip"
-
 if os.path.exists(save_path):
     print("Found existing model checkpoint. Resuming training from", save_path)
     model = PPO.load(

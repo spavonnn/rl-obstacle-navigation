@@ -177,7 +177,7 @@ class TurtlebotGymEnv(gym.Env):
 		self.cmd_vel_pub.publish(cmd)
 
 		# wait for new sensor update
-		while not self.new_scan:
+		while not self.new_scan:  
 			rclpy.spin_once(self.node, timeout_sec = 0.01) # process ROS messages until a new LiDAR scan callback updates self.new_scan
 
 		# get new observation
@@ -251,24 +251,17 @@ class TurtlebotGymEnv(gym.Env):
 		# reward progress toward goal
 		if self.prev_distance_to_goal is not None:
 			progress = self.prev_distance_to_goal - distance_to_goal
-			reward += 12.0 * progress
+			reward += 5.0 * progress # reduced from 12.0
 
-		# small survival reward to encourage longer episodes and exploration
-		reward += 0.1
-
-		# small penalty every step so robot does not waste its time
-		reward -= 0.05
+		reward -= 0.1 # time penatly only
 
 		# small penalty for doing nothing
 		if action == 3:
 			reward -= 0.1
 
-		# penalty if robot is not facing the goal well
-		reward -= 0.05 * abs(relative_angle)
-
 		# penalty if obstacle is too close in front
-		if front < 0.30:
-			reward -= 2.0
+		if front < 0.20:
+			reward -= 1.0
 
 		return reward
 
