@@ -251,7 +251,7 @@ class TurtlebotGymEnv(gym.Env):
 		# reward progress toward goal
 		if self.prev_distance_to_goal is not None:
 			progress = self.prev_distance_to_goal - distance_to_goal
-			reward += 5.0 * progress # reduced from 12.0
+			reward += 8.0 * progress # reduced from 12.0
 
 		reward -= 0.1 # time penatly only
 
