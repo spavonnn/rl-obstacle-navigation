@@ -61,20 +61,19 @@ class TurtlebotGymEnv(gym.Env):
 		# goal position in odometry frame
 		# after /reset_simulation, odom resets to (0,0) at the spawn point,
 		# so the goal stays at a fixed offset from there
-		# world position (0.664, 1.674) converted to odom: subtract spawn offset resulting in goal at (2.664, 2.174) odometry frame
-		# odom_x = 0.664 - (-2.0) = 2.664
-		# odom_y = 1.674 - (-0.5) = 2.174
-
 		# odom = gazebo world - spawn offset
 		# gazebo world = odom + spawn offset
-
 		# spawn offset = (-2.0, -0.5)
-		# spawn/start odom frame (0,0) is at world ( -2.0, -0.5)
-		# old goal odom frame (2.0, 0) is at world (0, -0.5)
-		# current goal odom frame (2.664, 2.174) is at world (0.664, 1.674)
 
-		self.goal_x = 2.664
-		self.goal_y = 2.174
+		# spawn/start odom frame (0, 0) is at world (-2.0, -0.5)
+		# old goal odom frame (2.0, 0.0) is at world (0.0, -0.5)
+		# previous goal odom frame (2.664, 2.174) is at world (0.664, 1.674) - open gap between cylinders but too far
+		# current goal odom frame (1.5, 0.5) is at world (-0.5, 0.0) - closer open area for easier convergence
+		# odom_x = -0.5 - (-2.0) = 1.5
+		# odom_y = 0.0 - (-0.5) = 0.5
+
+		self.goal_x = 1.5
+		self.goal_y = 0.5
 
 		# lidar storage
 		self.lidar_ranges = None
