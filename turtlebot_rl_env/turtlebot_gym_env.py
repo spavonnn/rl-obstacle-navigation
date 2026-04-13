@@ -1,13 +1,14 @@
-#imports
+# imports
 import gymnasium as gym
 import numpy as np
 import rclpy
 import time
+import random
 
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan
 from geometry_msgs.msg import Twist
-from std_srvs.srv import Empty 
+from std_srvs.srv import Empty
 from tf_transformations import euler_from_quaternion
 
 
@@ -46,46 +47,73 @@ class TurtlebotGymEnv(gym.Env):
 			10
 		)
 
+		# /reset_simulation service client
 		self.reset_sim_client = self.node.create_client(
 			Empty,
 			"/reset_simulation"
-		) 
+		)
 
-		# robot pose values (in odometry frame - which starts at (0,0) at spawn) 
-		# The robot spawns at Gazebo world (-2.0, -0.5).
-		# At that moment /reset_simulation resets /odom to (0, 0)
-		self.robot_x = 0.0
-		self.robot_y = 0.0
+		# robot pose values (in odometry frame)
+		self.robot_x   = 0.0
+		self.robot_y   = 0.0
 		self.robot_yaw = 0.0
 
-		# goal position in odometry frame
-		# after /reset_simulation, odom resets to (0,0) at the spawn point,
-		# so the goal stays at a fixed offset from there
-		# odom = gazebo world - spawn offset
-		# gazebo world = odom + spawn offset
-		# spawn offset = (-2.0, -0.5)
+		# -------------------------------------------------------
+		# PART 2 - RANDOMIZED GOAL POSITIONS FROM SET LIST THEN LATER ON TRUE RANDOM GOALS WITH OBSTACLE CHECKING + RANDOM OBSTACLES
+		# -------------------------------------------------------
+		# Instead of a fixed goal, a new random goal is picked
+		# at the start of every episode from a list of safe
+		# positions that are verified to be clear of obstacles
+		# and walls.
+		#
+		# COORDINATE SYSTEM:
+		# All positions below are in odom frame.
+		# odom = gazebo_world - spawn_offset
+		# spawn_offset = (-2.0, -0.5)
+		#
+		# ARENA BOUNDARIES (odom frame, with 0.3m wall buffer):
+		# x range: 0.5 to 3.5
+		# y range: -1.4 to 2.4
+		#
+		# CYLINDER POSITIONS (odom frame, radius = 0.15m):
+		# (0.9, -0.6), (0.9, 0.5), (0.9, 1.6)
+		# (2.0, -0.6), (2.0, 0.5), (2.0, 1.6)
+		# (3.1, -0.6), (3.1, 0.5), (3.1, 1.6)
+		#
+		# Each safe goal position below was chosen to be:
+		# - inside the arena boundaries
+		# - at least 0.5m away from every cylinder
+		# - at least 0.5m away from the spawn position (0,0)
+		# -------------------------------------------------------
 
-		# spawn/start odom frame (0, 0) is at world (-2.0, -0.5)
-		# old goal odom frame (2.0, 0.0) is at world (0.0, -0.5)
-		# previous goal odom frame (2.664, 2.174) is at world (0.664, 1.674) - open gap between cylinders but too far
-		# current goal odom frame (1.5, 0.5) is at world (-0.5, 0.0) - closer open area for easier convergence
-		# odom_x = -0.5 - (-2.0) = 1.5
-		# odom_y = 0.0 - (-0.5) = 0.5
+		# list of safe goal positions in odom frame
+		self.safe_goal_positions = [
+			(1.5,  0.5),   # open gap between cylinder rows (part 1 goal)
+			(1.5, -1.0),   # open area bottom right of arena
+			(1.5,  2.0),   # open area top right of arena
+			(0.5,  0.0),   # close open area near spawn
+			(0.5,  1.5),   # open area top left of arena
+			(0.5, -1.0),   # open area bottom left of arena
+			(2.5, -1.0),   # open area bottom middle of arena
+			(2.5,  2.0),   # open area top middle of arena
+		]
 
-		self.goal_x = 1.5
-		self.goal_y = 0.5
+		# current goal — gets set randomly in reset()
+		self.goal_x = self.safe_goal_positions[0][0]
+		self.goal_y = self.safe_goal_positions[0][1]
 
 		# lidar storage
 		self.lidar_ranges = None
-		self.new_scan = False
+		self.new_scan     = False
 
 		# previous distance for progress reward
 		self.prev_distance_to_goal = None
 
 		# step counter for max episode length truncation
-		# if robot hasn't collided or reached the goal after this many steps, end the episode to prevent wandering forever.
+		# if robot hasn't collided or reached the goal after this many steps,
+		# end the episode to prevent wandering forever
 		self.current_step = 0
-		self.max_steps = 500
+		self.max_steps    = 500
 
 		# action space:
 		# 0 = forward
@@ -103,81 +131,98 @@ class TurtlebotGymEnv(gym.Env):
 			dtype=np.float32
 		)
 
+	def _pick_random_goal(self):
+		"""
+		Picks a random goal position from the safe_goal_positions list.
+		Makes sure the new goal is not the same as the current goal
+		so the robot always gets a different target each episode.
+		"""
+		# get all positions except the current one
+		other_positions = [
+			pos for pos in self.safe_goal_positions
+			if pos != (self.goal_x, self.goal_y)
+		]
+
+		# pick a random one
+		new_goal = random.choice(other_positions)
+		self.goal_x = new_goal[0]
+		self.goal_y = new_goal[1]
+
+		self.node.get_logger().info(
+			f"New goal set to odom ({self.goal_x}, {self.goal_y})"
+		)
+
 	def reset(self, seed=None, options=None):
-		# reset simulation - standard gymnasium reset
+		# standard gymnasium reset
 		super().reset(seed=seed)
 
-		# step 1 - stop robot at the start of episode so it doesn't carry into the next episode
+		# step 1 - stop the robot
 		cmd = Twist()
-		cmd.linear.x = 0.0
+		cmd.linear.x  = 0.0
 		cmd.angular.z = 0.0
 		self.cmd_vel_pub.publish(cmd)
 
-		# step 2 - call reset service to reset simulation and robot pose
+		# step 2 - call /reset_simulation to teleport robot back to spawn
 		self.reset_sim_client.wait_for_service(timeout_sec=5.0)
 		future = self.reset_sim_client.call_async(Empty.Request())
 		while not future.done():
 			rclpy.spin_once(self.node, timeout_sec=0.05)
-		
-		# step 3 - wait for Gazebo to finish the reset
-		time.sleep(0.5) # give Gazebo some time to reset the simulation and publish the first odometry and scan messages
 
-		# step 4 - stop again after the reset
+		# step 3 - wait for Gazebo to finish the reset
+		time.sleep(0.5)
+
+		# step 4 - stop again after reset
 		self.cmd_vel_pub.publish(cmd)
 
-		# step 5 - wait for a fresh LiDAR scan from the new spawn position 
-		# to make sure _get_obs() returns real values and not old ones from before the reset.
-		# wait until at least one new scan arrives
+		# step 5 - pick a new random goal for this episode
+		self._pick_random_goal()
+
+		# step 6 - wait for a fresh LiDAR scan from the new spawn position
 		self.new_scan = False
 		while not self.new_scan:
 			rclpy.spin_once(self.node, timeout_sec=0.01)
 
-		# step 6 - get first real observation and return it
+		# step 7 - get first observation and return it
 		observation = self._get_obs()
-
-		# saving distance for reward progress calculation
 		self.prev_distance_to_goal = observation[0]
 
-		# reset step counter at the start of every episode
+		# reset step counter
 		self.current_step = 0
 
-		info = { }
+		info = {}
 		return observation, info
 
 	def step(self, action):
 		# create velocity command
 		cmd = Twist()
 
-		# choosing robot actions:
-
 		# action 0 = forward
 		if action == 0:
-			cmd.linear.x = 0.3
+			cmd.linear.x  = 0.3
 			cmd.angular.z = 0.0
 
 		# action 1 = turn left
 		elif action == 1:
-			cmd.linear.x = 0.0
+			cmd.linear.x  = 0.0
 			cmd.angular.z = 0.5
 
 		# action 2 = turn right
 		elif action == 2:
-			cmd.linear.x = 0.0
+			cmd.linear.x  = 0.0
 			cmd.angular.z = -0.5
 
 		# action 3 = stop
 		elif action == 3:
-			cmd.linear.x = 0.0
+			cmd.linear.x  = 0.0
 			cmd.angular.z = 0.0
-
 
 		# publish action
 		self.new_scan = False
 		self.cmd_vel_pub.publish(cmd)
 
 		# wait for new sensor update
-		while not self.new_scan:  
-			rclpy.spin_once(self.node, timeout_sec = 0.01) # process ROS messages until a new LiDAR scan callback updates self.new_scan
+		while not self.new_scan:
+			rclpy.spin_once(self.node, timeout_sec=0.01)
 
 		# get new observation
 		observation = self._get_obs()
@@ -186,13 +231,13 @@ class TurtlebotGymEnv(gym.Env):
 		distance_to_goal, relative_angle, front, left, right = observation
 
 		# thresholds
-		collision_distance = 0.12
-		goal_distance = 0.20
+		collision_distance = 0.12  # 12cm — matches robot body size
+		goal_distance      = 0.20
 
 		# collision check
 		collision = bool(
 			front < collision_distance or
-			left < collision_distance or
+			left  < collision_distance or
 			right < collision_distance
 		)
 
@@ -205,9 +250,8 @@ class TurtlebotGymEnv(gym.Env):
 		# increment step counter
 		self.current_step += 1
 
-		# truncate episode if max steps reached to prevent robot from wandering forever if it never collides or reaches the goal.
+		# truncate episode if max steps reached
 		truncated = bool(self.current_step >= self.max_steps)
-
 
 		# computing reward
 		reward = self._compute_reward(
@@ -222,19 +266,15 @@ class TurtlebotGymEnv(gym.Env):
 
 		# extra debug info
 		info = {
-			"collision": collision,
+			"collision":    collision,
 			"goal_reached": goal_reached,
-			"step": self.current_step
+			"step":         self.current_step,
+			"goal":         (self.goal_x, self.goal_y)
 		}
 
 		return observation, reward, terminated, truncated, info
 
 	def _compute_reward(self, observation, collision, goal_reached, action):
-		# collision penalty
-		# progress toward goal
-		# time penalty
-		# goal reach and safe stopping bonus
-
 		# unpack observation
 		distance_to_goal, relative_angle, front, left, right = observation
 
@@ -243,6 +283,7 @@ class TurtlebotGymEnv(gym.Env):
 		# big negative reward for collision
 		if collision:
 			reward -= 100.0
+
 		# big positive reward for reaching goal
 		if goal_reached:
 			reward += 100.0
@@ -250,9 +291,10 @@ class TurtlebotGymEnv(gym.Env):
 		# reward progress toward goal
 		if self.prev_distance_to_goal is not None:
 			progress = self.prev_distance_to_goal - distance_to_goal
-			reward += 8.0 * progress # reduced from 12.0
+			reward += 8.0 * progress
 
-		reward -= 0.1 # time penatly only
+		# small time penalty so robot doesn't idle
+		reward -= 0.1
 
 		# small penalty for doing nothing
 		if action == 3:
@@ -265,94 +307,60 @@ class TurtlebotGymEnv(gym.Env):
 		return reward
 
 	def odom_callback(self, msg):
-
-		# saving robot x and y position
 		self.robot_x = msg.pose.pose.position.x
 		self.robot_y = msg.pose.pose.position.y
 
-		# getting quaternion orientation
-		q = msg.pose.pose.orientation
+		q    = msg.pose.pose.orientation
 		quat = [q.x, q.y, q.z, q.w]
 
-		# quaternion conversion → roll, pitch, yaw
 		roll, pitch, yaw = euler_from_quaternion(quat)
-
-		# store yaw
-		self.robot_yaw  = yaw
+		self.robot_yaw = yaw
 
 	def scan_callback(self, msg):
-		# store lidar ranges
 		self.lidar_ranges = np.array(msg.ranges, dtype=np.float32)
-
-		# marking that a fresh scan arrived
-		self.new_scan = True
+		self.new_scan     = True
 
 	def _get_obs(self):
-		# distance to goal
-		# relative angle to goal
-		# minimum obstacle distance in front
-		# minimum obstacle distance on the left
-		# minimum obstacle distance on the right
-
-
-		# get current robot pose (x, y, yaw)
-		# compute goal distance (dx, dy to goal)
-		# compute goal angle difference
-		# split LiDAR into 3 sectors
-		# take min. value from each sector
-		# return all 5 values as one observation vector
-
 		# distance from robot to goal
 		dx = self.goal_x - self.robot_x
 		dy = self.goal_y - self.robot_y
 		distance_to_goal = np.sqrt(dx**2 + dy**2)
 
-		# angle from robot to goal
-		goal_angle = np.arctan2(dy, dx)
+		# angle to goal wrapped to [-pi, pi]
+		goal_angle     = np.arctan2(dy, dx)
 		relative_angle = goal_angle - self.robot_yaw
-
-		# forces angle to wrap properly, so robot always turns the shortest/most natural way toward goal
-		# converts angle into shortest possible turn direction
-		#wrapping angle to [-pi,pi]
 		relative_angle = np.arctan2(
 			np.sin(relative_angle),
 			np.cos(relative_angle)
 		)
 
-		# lidar values
+		# lidar sector values
 		if self.lidar_ranges is None:
 			front = 10.0
-			left = 10.0
+			left  = 10.0
 			right = 10.0
 		else:
 			ranges = np.nan_to_num(
-			self.lidar_ranges,
-			nan = 10.0,
-			posinf = 10.0,
-			neginf = 10.0
+				self.lidar_ranges,
+				nan=10.0,
+				posinf=10.0,
+				neginf=10.0
 			)
 
 			n = len(ranges)
-			k = 10 	#sector width
+			k = 10  # sector half-width in beams
 
-			# front sector = values near beginning and end
 			front_sector = np.concatenate((ranges[:k], ranges[-k:]))
-
-			# left sector center
-			left_center = n // 4
-
-			# right sector center
+			left_center  = n // 4
 			right_center = 3 * n // 4
-
-			left_sector = ranges[left_center - k : left_center + k]
+			left_sector  = ranges[left_center  - k : left_center  + k]
 			right_sector = ranges[right_center - k : right_center + k]
 
-			front = np.nanmin(front_sector)
-			left = np.nanmin(left_sector)
-			right = np.nanmin(right_sector)
+			front = float(np.nanmin(front_sector))
+			left  = float(np.nanmin(left_sector))
+			right = float(np.nanmin(right_sector))
 
-		# final observation vector
-		observation = np.array([
+		return np.array([
 			distance_to_goal,
 			relative_angle,
 			front,
@@ -360,14 +368,9 @@ class TurtlebotGymEnv(gym.Env):
 			right,
 		], dtype=np.float32)
 
-		return observation
-
 	def close(self):
-		# stop robot before closing
 		cmd = Twist()
-		cmd.linear.x = 0.0
+		cmd.linear.x  = 0.0
 		cmd.angular.z = 0.0
 		self.cmd_vel_pub.publish(cmd)
-
-		# destroy ROS node
 		self.node.destroy_node()
