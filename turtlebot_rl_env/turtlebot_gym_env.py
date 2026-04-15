@@ -231,7 +231,7 @@ class TurtlebotGymEnv(gym.Env):
 		distance_to_goal, relative_angle, front, front_left, left, back_left, back, back_right, right, front_right = observation
 
 		# thresholds
-		collision_distance = 0.12  # 12cm — matches robot body size
+		collision_distance = 0.18  # 18cm — matches robot body size
 		goal_distance      = 0.20
 
 		# collision check
@@ -303,6 +303,10 @@ class TurtlebotGymEnv(gym.Env):
 		if self.prev_distance_to_goal is not None:
 			progress = self.prev_distance_to_goal - distance_to_goal
 			reward += 8.0 * progress
+		
+		# small reward for facing toward the goal
+		heading_bonus = 0.3 * (1.0 - abs(relative_angle) / np.pi)
+		reward += heading_bonus
 
 		# small time penalty so robot doesn't idle
 		reward -= 0.1
