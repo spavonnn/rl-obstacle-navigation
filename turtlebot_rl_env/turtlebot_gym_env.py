@@ -253,6 +253,15 @@ class TurtlebotGymEnv(gym.Env):
 		# truncate episode if max steps reached
 		truncated = bool(self.current_step >= self.max_steps)
 
+		# log how the episode ended for debugging
+		if terminated or truncated:
+			if collision:
+				self.node.get_logger().info("Episode ended due to COLLISION.")
+			elif goal_reached:
+				self.node.get_logger().info("Episode ended with GOAL REACHED!")
+			else:
+				self.node.get_logger().info("Episode ended due to MAX STEPS reached.")
+
 		# computing reward
 		reward = self._compute_reward(
 			observation,
