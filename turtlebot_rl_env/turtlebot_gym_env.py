@@ -113,7 +113,7 @@ class TurtlebotGymEnv(gym.Env):
 		# if robot hasn't collided or reached the goal after this many steps,
 		# end the episode to prevent wandering forever
 		self.current_step = 0
-		self.max_steps    = 500
+		self.max_steps    = 750
 
 		# action space:
 		# 0 = forward
@@ -127,7 +127,7 @@ class TurtlebotGymEnv(gym.Env):
 		self.observation_space = gym.spaces.Box(
 			low=-np.inf,
 			high=np.inf,
-			shape=(5,),
+			shape=(10,),
 			dtype=np.float32
 		)
 
@@ -228,7 +228,7 @@ class TurtlebotGymEnv(gym.Env):
 		observation = self._get_obs()
 
 		# unpacking observation values
-		distance_to_goal, relative_angle, front, left, right = observation
+		distance_to_goal, relative_angle, front, front_left, left, back_left, back, back_right, right, front_right = observation
 
 		# thresholds
 		collision_distance = 0.12  # 12cm — matches robot body size
@@ -237,6 +237,8 @@ class TurtlebotGymEnv(gym.Env):
 		# collision check
 		collision = bool(
 			front < collision_distance or
+			front_left < collision_distance or
+			front_right < collision_distance or
 			left  < collision_distance or
 			right < collision_distance
 		)
@@ -285,7 +287,7 @@ class TurtlebotGymEnv(gym.Env):
 
 	def _compute_reward(self, observation, collision, goal_reached, action):
 		# unpack observation
-		distance_to_goal, relative_angle, front, left, right = observation
+		distance_to_goal, relative_angle, front, front_left, left, back_left, back, back_right, right, front_right = observation
 
 		reward = 0.0
 
@@ -335,19 +337,32 @@ class TurtlebotGymEnv(gym.Env):
 		dy = self.goal_y - self.robot_y
 		distance_to_goal = np.sqrt(dx**2 + dy**2)
 
+		# normalize distance to 0-1 range using max arena diagonal
+		max_distance = 6.0 # approximate max distance across the arena
+		distance_normalized = float(np.clip(distance_to_goal / max_distance, 0.0, 1.0))
+
 		# angle to goal wrapped to [-pi, pi]
 		goal_angle     = np.arctan2(dy, dx)
 		relative_angle = goal_angle - self.robot_yaw
-		relative_angle = np.arctan2(
+		relative_angle = float(np.arctan2(
 			np.sin(relative_angle),
 			np.cos(relative_angle)
-		)
+		))
 
 		# lidar sector values
+		# expanded from 3 sectors to 8 sectors for better obstacle awareness
+		# this will help the robot navigate around obstacles more effectively
+
 		if self.lidar_ranges is None:
 			front = 10.0
+			front_left = 10.0
 			left  = 10.0
+			back_left = 10.0
+			back = 10.0
+			back_right = 10.0
 			right = 10.0
+			front_right = 10.0
+
 		else:
 			ranges = np.nan_to_num(
 				self.lidar_ranges,
@@ -356,25 +371,57 @@ class TurtlebotGymEnv(gym.Env):
 				neginf=10.0
 			)
 
-			n = len(ranges)
+			n = len(ranges) # 360 beams
 			k = 10  # sector half-width in beams
 
-			front_sector = np.concatenate((ranges[:k], ranges[-k:]))
-			left_center  = n // 4
-			right_center = 3 * n // 4
-			left_sector  = ranges[left_center  - k : left_center  + k]
-			right_sector = ranges[right_center - k : right_center + k]
+			# 8 sectors evenly spaced around 360 degrees
+			# each sector center is 45 degrees apart
+			# sector centers at: 0 (front), 45 (front-left), 90 (left), 135 (back-left), 180 (back), 225 (back-right), 270 (right), 315 (front-right)
 
+			
+			front_center = 0                    # 0 degrees
+			front_left_center  = n // 8			# 45 degrees
+			left_center       = n // 4			# 90 degrees
+			back_left_center  = 3 * n // 8		# 135 degrees
+			back_center       = n // 2			# 180 degrees
+			back_right_center = 5 * n // 8		# 225 degrees
+			right_center      = 3 * n // 4		# 270 degrees
+			front_right_center = 7 * n // 8		# 315 degrees
+
+
+			# front sector wraps around array start/end, so we concatenate the end and start of the ranges array
+			front_sector = np.concatenate((ranges[:k], ranges[-k:]))
+
+			# all other sectors
+			front_left_sector  = ranges[front_left_center - k : front_left_center + k]
+			left_sector       = ranges[left_center - k : left_center + k]
+			back_left_sector  = ranges[back_left_center - k : back_left_center + k]
+			back_sector       = ranges[back_center - k : back_center + k]
+			back_right_sector = ranges[back_right_center - k : back_right_center + k]
+			right_sector      = ranges[right_center - k : right_center + k]
+			front_right_sector = ranges[front_right_center - k : front_right_center + k]
+
+			# take minimum distance in each sector as the sector value
 			front = float(np.nanmin(front_sector))
-			left  = float(np.nanmin(left_sector))
+			front_left = float(np.nanmin(front_left_sector))
+			left = float(np.nanmin(left_sector))
+			back_left = float(np.nanmin(back_left_sector))
+			back = float(np.nanmin(back_sector))
+			back_right = float(np.nanmin(back_right_sector))
 			right = float(np.nanmin(right_sector))
+			front_right = float(np.nanmin(front_right_sector))
 
 		return np.array([
-			distance_to_goal,
-			relative_angle,
-			front,
-			left,
-			right,
+			distance_normalized,     # normalized 0-1
+			relative_angle,			 # angle to goal in radians, wrapped to [-pi, pi]
+			front,			 		 # 0 degrees
+			front_left,			     # 45 degrees
+			left,				     # 90 degrees
+			back_left,			     # 135 degrees
+			back,				     # 180 degrees
+			back_right,		     	 # 225 degrees
+			right,				     # 270 degrees
+			front_right			     # 315 degrees
 		], dtype=np.float32)
 
 	def close(self):
