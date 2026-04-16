@@ -58,49 +58,19 @@ class TurtlebotGymEnv(gym.Env):
 		self.robot_y   = 0.0
 		self.robot_yaw = 0.0
 
+	
+		# PART 2 STEP 2 - TRULY RANDOM GOALS
 		# -------------------------------------------------------
-		# PART 2 - RANDOMIZED GOAL POSITIONS FROM SET LIST THEN LATER ON TRUE RANDOM GOALS WITH OBSTACLE CHECKING + RANDOM OBSTACLES
-		# -------------------------------------------------------
-		# Instead of a fixed goal, a new random goal is picked
-		# at the start of every episode from a list of safe
-		# positions that are verified to be clear of obstacles
-		# and walls.
-		#
-		# COORDINATE SYSTEM:
-		# All positions below are in odom frame.
-		# odom = gazebo_world - spawn_offset
-		# spawn_offset = (-2.0, -0.5)
-		#
-		# ARENA BOUNDARIES (odom frame, with 0.3m wall buffer):
-		# x range: 0.5 to 3.5
-		# y range: -1.4 to 2.4
-		#
-		# CYLINDER POSITIONS (odom frame, radius = 0.15m):
-		# (0.9, -0.6), (0.9, 0.5), (0.9, 1.6)
-		# (2.0, -0.6), (2.0, 0.5), (2.0, 1.6)
-		# (3.1, -0.6), (3.1, 0.5), (3.1, 1.6)
-		#
-		# Each safe goal position below was chosen to be:
-		# - inside the arena boundaries
-		# - at least 0.5m away from every cylinder
-		# - at least 0.5m away from the spawn position (0,0)
+		# A new random goal is generated at the start of every
+		# episode anywhere inside the arena, as long as it is:
+		# - inside the arena boundaries (x: 0.5-3.5, y: -1.4-2.4)
+		# - at least 0.5m away from every cylinder obstacle
+		# - at least 0.5m away from the spawn position 
 		# -------------------------------------------------------
 
-		# list of safe goal positions in odom frame
-		self.safe_goal_positions = [
-			(1.5,  0.5),   # open gap between cylinder rows (part 1 goal)
-			(1.5, -1.0),   # open area bottom right of arena
-			(1.5,  2.0),   # open area top right of arena
-			(0.5,  0.0),   # close open area near spawn
-			(0.5,  1.5),   # open area top left of arena
-			(0.5, -1.0),   # open area bottom left of arena
-			(2.5, -1.0),   # open area bottom middle of arena
-			(2.5,  2.0),   # open area top middle of arena
-		]
-
-		# current goal — gets set randomly in reset()
-		self.goal_x = self.safe_goal_positions[0][0]
-		self.goal_y = self.safe_goal_positions[0][1]
+		# current goal - gets set randomly at the start of each episode in reset()
+		self.goal_x = 1.5
+		self.goal_y = 0.5
 
 		# lidar storage
 		self.lidar_ranges = None
@@ -132,25 +102,47 @@ class TurtlebotGymEnv(gym.Env):
 		)
 
 	def _pick_random_goal(self):
-		"""
-		Picks a random goal position from the safe_goal_positions list.
-		Makes sure the new goal is not the same as the current goal
-		so the robot always gets a different target each episode.
-		"""
-		# get all positions except the current one
-		other_positions = [
-			pos for pos in self.safe_goal_positions
-			if pos != (self.goal_x, self.goal_y)
+		
+		# Picks a truly random goal position anywhere in the arena. 
+		# Keeps trying until it finds a spot that is:
+		# - inside the arena boundaries
+		# - not too close to any of the cylinder obstacles (at least 0.5m away)
+		# - not too close to the spawn point (at least 0.5m away)
+		
+		# arena boundaries in odom frame 
+		x_min, x_max = 0.5, 3.5
+		y_min, y_max = -1.4, 2.4
+
+		# cylinder positions in odom frame
+		cylinders = [
+			(0.9, -0.6), (0.9, 0.5), (0.9, 1.6),
+			(2.0, -0.6), (2.0, 0.5), (2.0, 1.6),
+			(3.1, -0.6), (3.1, 0.5), (3.1, 1.6)
 		]
+		
+		while True:
+			# pick a random x and y inside the arena
+			x = random.uniform(x_min, x_max)
+			y = random.uniform(y_min, y_max)
 
-		# pick a random one
-		new_goal = random.choice(other_positions)
-		self.goal_x = new_goal[0]
-		self.goal_y = new_goal[1]
+			# skip if too close to spawn
+			if np.sqrt(x**2 + y**2) < 0.5:
+				continue
 
-		self.node.get_logger().info(
-			f"New goal set to odom ({self.goal_x}, {self.goal_y})"
-		)
+			# skip if too close to any cylinder
+			too_close = False
+			for cx, cy in cylinders:
+				if np.sqrt((x - cx)**2 + (y - cy)**2) < 0.5:
+					too_close = True
+					break
+			# if position passed all checks, use it
+			if not too_close:
+				self.goal_x = round (x, 3)
+				self.goal_y = round (y, 3)
+				self.node.get_logger().info(
+					f"New random goal set to odom ({self.goal_x}, {self.goal_y})"
+				)
+				return # exit function once a valid goal is found
 
 	def reset(self, seed=None, options=None):
 		# standard gymnasium reset
