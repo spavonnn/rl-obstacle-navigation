@@ -302,7 +302,7 @@ class TurtlebotGymEnv(gym.Env):
 		
 
 		# small time penalty so robot doesn't idle
-		reward -= 0.1
+		reward -= 0.3
 
 		# small penalty for doing nothing
 		if action == 3:
