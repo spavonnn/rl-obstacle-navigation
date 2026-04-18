@@ -296,9 +296,10 @@ class TurtlebotGymEnv(gym.Env):
 			progress = self.prev_distance_to_goal - distance_to_goal
 			reward += 8.0 * progress
 
-		# small heading bonus for facing toward the goal
-		heading_bonus = 0.3 * (1.0 - abs(relative_angle) / np.pi)
-		reward += heading_bonus
+		# heading bonus ONLY when moving forward toward goal
+		if action == 0:
+			heading_bonus = 0.3 * (1.0 - abs(relative_angle) / np.pi)
+			reward += heading_bonus
 
 		if front < 0.20:
 			reward -= 1.0
