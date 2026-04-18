@@ -288,7 +288,7 @@ class TurtlebotGymEnv(gym.Env):
 			reward -= 100.0
 
 		# big positive reward for reaching goal
-		if goal_reached:
+		if goal_reached: 
 			reward += 200.0
 
 		# reward progress toward goal
