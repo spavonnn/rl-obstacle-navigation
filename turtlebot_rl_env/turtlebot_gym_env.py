@@ -297,20 +297,15 @@ class TurtlebotGymEnv(gym.Env):
 			reward += 8.0 * progress
 
 	
-		heading_bonus = 0.3 * (1.0 - abs(relative_angle) / np.pi)
-		reward += heading_bonus
-
 		if front < 0.20:
 			reward -= 1.0
 
 		# small time penalty so robot doesn't idle
 		reward -= 0.1
 
-		# small penalty for doing nothing
-		if action == 3:
-			reward -= 0.1
-
-
+		if action ==1 or action == 2 or action == 3:
+			reward -= 0.3
+	
 		return reward
 
 	def odom_callback(self, msg):
