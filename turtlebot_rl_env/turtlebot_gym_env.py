@@ -83,7 +83,7 @@ class TurtlebotGymEnv(gym.Env):
 		# if robot hasn't collided or reached the goal after this many steps,
 		# end the episode to prevent wandering forever
 		self.current_step = 0
-		self.max_steps    = 300 # reduced from 750 
+		self.max_steps    = 750
 
 		# action space:
 		# 0 = forward
@@ -232,10 +232,7 @@ class TurtlebotGymEnv(gym.Env):
 			front_left < collision_distance or
 			front_right < collision_distance or
 			left  < collision_distance or
-			right < collision_distance or
-			back_left < collision_distance or
-			back < collision_distance or
-			back_right < collision_distance
+			right < collision_distance 
 		)
 
 		# check goal reached
@@ -300,12 +297,11 @@ class TurtlebotGymEnv(gym.Env):
 			reward += 8.0 * progress
 
 		# small heading bonus for facing toward the goal
-		heading_bonus = 0.15 * (1.0 - abs(relative_angle) / np.pi)
+		heading_bonus = 0.3 * (1.0 - abs(relative_angle) / np.pi)
 		reward += heading_bonus
 
-		# penalty for turning without moving forward - encourages more efficient navigation
-		if action == 1 or action == 2:
-			reward -= 0.05  
+		if front < 0.20:
+			reward -= 1.0
 
 		# small time penalty so robot doesn't idle
 		reward -= 0.1
@@ -314,10 +310,6 @@ class TurtlebotGymEnv(gym.Env):
 		if action == 3:
 			reward -= 0.1
 
-		# penalty if obstacle is too close in front
-		min_obstacle = min(front, front_left, front_right, left, right, back_left, back, back_right)
-		if min_obstacle < 0.20:
-			reward -= 1.0
 
 		return reward
 
