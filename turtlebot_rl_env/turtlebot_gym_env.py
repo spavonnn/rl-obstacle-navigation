@@ -232,7 +232,10 @@ class TurtlebotGymEnv(gym.Env):
 			front_left < collision_distance or
 			front_right < collision_distance or
 			left  < collision_distance or
-			right < collision_distance
+			right < collision_distance or
+			back_left < collision_distance or
+			back < collision_distance or
+			back_right < collision_distance
 		)
 
 		# check goal reached
@@ -302,14 +305,15 @@ class TurtlebotGymEnv(gym.Env):
 		
 
 		# small time penalty so robot doesn't idle
-		reward -= 0.3
+		reward -= 0.1
 
 		# small penalty for doing nothing
 		if action == 3:
 			reward -= 0.1
 
 		# penalty if obstacle is too close in front
-		if front < 0.20:
+		min_obstacle = min(front, front_left, front_right, left, right, back_left, back, back_right)
+		if min_obstacle < 0.20:
 			reward -= 1.0
 
 		return reward
