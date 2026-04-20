@@ -16,6 +16,9 @@ class TurtlebotGymEnv(gym.Env):
 
 	def __init__(self):
 		super().__init__()
+		
+
+		self.episode_count = 0
 
 		# initializing ROS only once
 		if not rclpy.ok():
@@ -100,18 +103,20 @@ class TurtlebotGymEnv(gym.Env):
 			shape=(10,),
 			dtype=np.float32
 		)
-
 	def _pick_random_goal(self):
-		
-		# Picks a truly random goal position anywhere in the arena. 
-		# Keeps trying until it finds a spot that is:
-		# - inside the arena boundaries
-		# - not too close to any of the cylinder obstacles (at least 0.5m away)
-		# - not too close to the spawn point (at least 0.5m away)
-		
-		# arena boundaries in odom frame 
-		x_min, x_max = 0.5, 3.5
-		y_min, y_max = -1.4, 2.4
+		# curriculum learning - goals start close to spawn and get farther over time
+		# difficulty is a value between 0.0 (episode 0) and 1.0 (episode 2000+)
+		# after 2000 episodes the full arena is unlocked and difficulty stays at 1.0
+		difficulty = min(self.episode_count / 2000.0, 1.0)
+
+		# arena boundaries grow with difficulty
+		# x_max has a minimum of 1.5 so early episodes always have a reachable goal area
+		# at difficulty 0.0: x goes 0.5 to 1.5 (close goals only)
+		# at difficulty 1.0: x goes 0.5 to 3.5 (full arena)
+		x_min = 0.5
+		x_max = max(1.5, 0.5 + difficulty * 3.0)  # minimum 1.5, grows to 3.5
+		y_min = -difficulty * 1.4                   # grows from 0.0 to -1.4
+		y_max =  max(0.5, difficulty * 2.4)         # minimum 0.5, grows to 2.4
 
 		# cylinder positions in odom frame
 		cylinders = [
@@ -119,9 +124,9 @@ class TurtlebotGymEnv(gym.Env):
 			(2.0, -0.6), (2.0, 0.5), (2.0, 1.6),
 			(3.1, -0.6), (3.1, 0.5), (3.1, 1.6)
 		]
-		
+
 		while True:
-			# pick a random x and y inside the arena
+			# pick a random x and y inside the current difficulty bounds
 			x = random.uniform(x_min, x_max)
 			y = random.uniform(y_min, y_max)
 
@@ -135,14 +140,17 @@ class TurtlebotGymEnv(gym.Env):
 				if np.sqrt((x - cx)**2 + (y - cy)**2) < 0.5:
 					too_close = True
 					break
+
 			# if position passed all checks, use it
 			if not too_close:
-				self.goal_x = round (x, 3)
-				self.goal_y = round (y, 3)
+				self.goal_x = round(x, 3)
+				self.goal_y = round(y, 3)
+				# increment episode count so difficulty grows over time
+				self.episode_count += 1
 				self.node.get_logger().info(
-					f"New random goal set to odom ({self.goal_x}, {self.goal_y})"
+					f"New random goal set to odom ({self.goal_x}, {self.goal_y}) [difficulty: {difficulty:.2f}]"
 				)
-				return # exit function once a valid goal is found
+				return
 
 	def reset(self, seed=None, options=None):
 		# standard gymnasium reset
@@ -296,15 +304,17 @@ class TurtlebotGymEnv(gym.Env):
 			progress = self.prev_distance_to_goal - distance_to_goal
 			reward += 8.0 * progress
 
-	
+		heading_bonus = 0.3 * (1.0 - abs(relative_angle) / np.pi)
+		reward += heading_bonus
+		
 		if front < 0.20:
 			reward -= 1.0
 
 		# small time penalty so robot doesn't idle
 		reward -= 0.1
 
-		if action ==1 or action == 2 or action == 3:
-			reward -= 0.3
+		if action == 3:
+			reward -= 0.1
 	
 		return reward
 
