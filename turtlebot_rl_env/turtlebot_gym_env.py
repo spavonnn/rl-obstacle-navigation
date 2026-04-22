@@ -10,6 +10,7 @@ from sensor_msgs.msg import LaserScan
 from geometry_msgs.msg import Twist
 from std_srvs.srv import Empty
 from tf_transformations import euler_from_quaternion
+from visualization_msgs.msg import Marker
 
 
 class TurtlebotGymEnv(gym.Env):
@@ -26,6 +27,12 @@ class TurtlebotGymEnv(gym.Env):
 
 		# creating ROS node
 		self.node = rclpy.create_node("turtlebot_gym_env")
+
+		self.marker_pub = self.node.create_publisher(
+			Marker, 
+			"/goal_marker",
+			10
+		)
 
 		# publisher for robot velocity commands
 		self.cmd_vel_pub = self.node.create_publisher(
@@ -103,7 +110,34 @@ class TurtlebotGymEnv(gym.Env):
 			shape=(10,),
 			dtype=np.float32
 		)
+
+		# load episode count from file so difficulty continues across sessions
+		try:
+			with open("episode_count.txt", "r") as f:
+				self.episode_count = int(f.read())
+				self.node.get_logger().info(f"Loaded episode count: {self.episode_count}")
+		except:
+			self.episode_count = 0
+
+	def _publish_goal_marker(self):
+		marker = Marker()
+		marker.header.frame_id = "odom"
+		marker.type = Marker.SPHERE
+		marker.action = Marker.ADD
+		marker.pose.position.x = self.goal_x
+		marker.pose.position.y = self.goal_y
+		marker.pose.position.z = 0.1
+		marker.scale.x = 0.2
+		marker.scale.y = 0.2
+		marker.scale.z = 0.2
+		marker.color.r = 0.0
+		marker.color.g = 1.0 # green sphere
+		marker.color.b = 0.0
+		marker.color.a = 1.0
+		self.marker_pub.publish(marker)
+
 	def _pick_random_goal(self):
+
 		# curriculum learning - goals start close to spawn and get farther over time
 		# difficulty is a value between 0.0 (episode 0) and 1.0 (episode 2000+)
 		# after 2000 episodes the full arena is unlocked and difficulty stays at 1.0
@@ -147,9 +181,15 @@ class TurtlebotGymEnv(gym.Env):
 				self.goal_y = round(y, 3)
 				# increment episode count so difficulty grows over time
 				self.episode_count += 1
+
+				# save episode count so it continues across sessions
+				with open("episode_count.txt", "w") as f:
+					f.write(str(self.episode_count))
+
 				self.node.get_logger().info(
 					f"New random goal set to odom ({self.goal_x}, {self.goal_y}) [difficulty: {difficulty:.2f}]"
 				)
+				self._publish_goal_marker() 
 				return
 
 	def reset(self, seed=None, options=None):
@@ -174,8 +214,9 @@ class TurtlebotGymEnv(gym.Env):
 		# step 4 - stop again after reset
 		self.cmd_vel_pub.publish(cmd)
 
-		# step 5 - pick a new random goal for this episode
+		# step 5 - pick a new random goal for this episode and visualize it
 		self._pick_random_goal()
+		self._publish_goal_marker() 
 
 		# step 6 - wait for a fresh LiDAR scan from the new spawn position
 		self.new_scan = False
