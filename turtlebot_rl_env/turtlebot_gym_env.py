@@ -136,6 +136,23 @@ class TurtlebotGymEnv(gym.Env):
 		marker.color.a = 1.0
 		self.marker_pub.publish(marker)
 
+	def _spawn_goal_marker(self):
+		# spawn a red sphere at the goal position in Gazebo
+		import subprocess
+		subprocess.Popen([
+			'ros2', 'service', 'call', '/delete_entity',
+			'gazebo_msgs/srv/DeleteEntity',
+			'{"name": "goal_marker"}'
+		])
+		time.sleep(0.1)
+		# spawn new marker at goal position
+		sdf = f"""<?xml version="1.0" ?><sdf version="1.6"><model name="goal_marker"><static>true</static><link name="link"><visual name="visual"><geometry><sphere><radius>0.15</radius></sphere></geometry><material><ambient>1 0 0 1</ambient><diffuse>1 0 0 1</diffuse></material></visual></link></model></sdf>"""
+		subprocess.Popen([
+			'ros2', 'service', 'call', '/spawn_entity',
+			'gazebo_msgs/srv/SpawnEntity',
+			f'{{"name": "goal_marker", "xml": "{sdf.strip()}", "initial_pose": {{"position": {{"x": {self.goal_x}, "y": {self.goal_y}, "z": 0.15}}}}}}'
+    	])
+
 	def _pick_random_goal(self):
 
 		# curriculum learning - goals start close to spawn and get farther over time
@@ -189,7 +206,7 @@ class TurtlebotGymEnv(gym.Env):
 				self.node.get_logger().info(
 					f"New random goal set to odom ({self.goal_x}, {self.goal_y}) [difficulty: {difficulty:.2f}]"
 				)
-				self._publish_goal_marker() 
+				self._spawn_goal_marker() 
 				return
 
 	def reset(self, seed=None, options=None):
@@ -216,7 +233,7 @@ class TurtlebotGymEnv(gym.Env):
 
 		# step 5 - pick a new random goal for this episode and visualize it
 		self._pick_random_goal()
-		self._publish_goal_marker() 
+		self._spawn_goal_marker() 
 
 		# step 6 - wait for a fresh LiDAR scan from the new spawn position
 		self.new_scan = False
