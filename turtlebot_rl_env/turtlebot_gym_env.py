@@ -146,11 +146,11 @@ class TurtlebotGymEnv(gym.Env):
 		])
 		time.sleep(0.1)
 		# spawn new marker at goal position
-		sdf = f"""<?xml version="1.0" ?><sdf version="1.6"><model name="goal_marker"><static>true</static><link name="link"><visual name="visual"><geometry><sphere><radius>0.15</radius></sphere></geometry><material><ambient>1 0 0 1</ambient><diffuse>1 0 0 1</diffuse></material></visual></link></model></sdf>"""
+		sdf = sdf = '<sdf version=\\"1.6\\"><model name=\\"goal_marker\\"><static>true</static><link name=\\"link\\"><visual name=\\"visual\\"><geometry><sphere><radius>0.15</radius></sphere></geometry><material><ambient>1 0 0 1</ambient><diffuse>1 0 0 1</diffuse></material></visual></link></model></sdf>'
 		subprocess.Popen([
 			'ros2', 'service', 'call', '/spawn_entity',
 			'gazebo_msgs/srv/SpawnEntity',
-			f'{{"name": "goal_marker", "xml": "{sdf.strip()}", "initial_pose": {{"position": {{"x": {self.goal_x}, "y": {self.goal_y}, "z": 0.15}}}}}}'
+			'{"name": "goal_marker", "xml": "' + sdf + '", "initial_pose": {"position": {"x": ' + str(self.goal_x) + ', "y": ' + str(self.goal_y) + ', "z": 0.15}}}'
     	])
 
 	def _pick_random_goal(self):
