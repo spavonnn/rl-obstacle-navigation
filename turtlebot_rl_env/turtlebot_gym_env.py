@@ -255,9 +255,10 @@ class TurtlebotGymEnv(gym.Env):
 		# unpacking observation values
 		distance_to_goal, relative_angle, front, front_left, left, back_left, back, back_right, right, front_right = observation
 
+
 		# thresholds
 		collision_distance = 0.18  # 18cm — matches robot body size
-		goal_distance      = 0.20
+		goal_distance      = 0.20 
 
 		# collision check
 		collision = bool(
@@ -268,8 +269,9 @@ class TurtlebotGymEnv(gym.Env):
 			right < collision_distance 
 		)
 
-		# check goal reached
-		goal_reached = bool(distance_to_goal < goal_distance)
+		# unnormalize distance back to meters for goal check
+		actual_distance = distance_to_goal * 6.0
+		goal_reached = bool(actual_distance < goal_distance)
 
 		# episode ends if collision or goal is reached
 		terminated = bool(collision or goal_reached)
