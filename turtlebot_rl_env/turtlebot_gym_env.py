@@ -10,7 +10,6 @@ from sensor_msgs.msg import LaserScan
 from geometry_msgs.msg import Twist
 from std_srvs.srv import Empty
 from tf_transformations import euler_from_quaternion
-from visualization_msgs.msg import Marker
 
 
 class TurtlebotGymEnv(gym.Env):
@@ -28,11 +27,6 @@ class TurtlebotGymEnv(gym.Env):
 		# creating ROS node
 		self.node = rclpy.create_node("turtlebot_gym_env")
 
-		self.marker_pub = self.node.create_publisher(
-			Marker, 
-			"/goal_marker",
-			10
-		)
 
 		# publisher for robot velocity commands
 		self.cmd_vel_pub = self.node.create_publisher(
@@ -119,39 +113,7 @@ class TurtlebotGymEnv(gym.Env):
 		except:
 			self.episode_count = 0
 
-	def _publish_goal_marker(self):
-		marker = Marker()
-		marker.header.frame_id = "odom"
-		marker.type = Marker.SPHERE
-		marker.action = Marker.ADD
-		marker.pose.position.x = self.goal_x
-		marker.pose.position.y = self.goal_y
-		marker.pose.position.z = 0.1
-		marker.scale.x = 0.2
-		marker.scale.y = 0.2
-		marker.scale.z = 0.2
-		marker.color.r = 0.0
-		marker.color.g = 1.0 # green sphere
-		marker.color.b = 0.0
-		marker.color.a = 1.0
-		self.marker_pub.publish(marker)
 
-	def _spawn_goal_marker(self):
-		# spawn a red sphere at the goal position in Gazebo
-		import subprocess
-		subprocess.Popen([
-			'ros2', 'service', 'call', '/delete_entity',
-			'gazebo_msgs/srv/DeleteEntity',
-			'{"name": "goal_marker"}'
-		])
-		time.sleep(0.1)
-		# spawn new marker at goal position
-		sdf = sdf = '<sdf version=\\"1.6\\"><model name=\\"goal_marker\\"><static>true</static><link name=\\"link\\"><visual name=\\"visual\\"><geometry><sphere><radius>0.15</radius></sphere></geometry><material><ambient>1 0 0 1</ambient><diffuse>1 0 0 1</diffuse></material></visual></link></model></sdf>'
-		subprocess.Popen([
-			'ros2', 'service', 'call', '/spawn_entity',
-			'gazebo_msgs/srv/SpawnEntity',
-			'{"name": "goal_marker", "xml": "' + sdf + '", "initial_pose": {"position": {"x": ' + str(self.goal_x) + ', "y": ' + str(self.goal_y) + ', "z": 0.15}}}'
-    	])
 
 	def _pick_random_goal(self):
 
@@ -206,7 +168,6 @@ class TurtlebotGymEnv(gym.Env):
 				self.node.get_logger().info(
 					f"New random goal set to odom ({self.goal_x}, {self.goal_y}) [difficulty: {difficulty:.2f}]"
 				)
-				self._spawn_goal_marker() 
 				return
 
 	def reset(self, seed=None, options=None):
@@ -228,12 +189,18 @@ class TurtlebotGymEnv(gym.Env):
 		# step 3 - wait for Gazebo to finish the reset
 		time.sleep(0.5)
 
+		# spin a few times to get fresh odom
+		for _ in range(20):
+			rclpy.spin_once(self.node, timeout_sec=0.01)
+		
+		self.node.get_logger().info(
+			f"Robot position after reset: ({self.robot_x:.3f}, {self.robot_y:.3f})"
+		)
 		# step 4 - stop again after reset
 		self.cmd_vel_pub.publish(cmd)
 
 		# step 5 - pick a new random goal for this episode and visualize it
 		self._pick_random_goal()
-		self._spawn_goal_marker() 
 
 		# step 6 - wait for a fresh LiDAR scan from the new spawn position
 		self.new_scan = False
