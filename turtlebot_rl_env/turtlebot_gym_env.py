@@ -329,9 +329,12 @@ class TurtlebotGymEnv(gym.Env):
 		# reward progress toward goal
 		if self.prev_distance_to_goal is not None:
 			progress = self.prev_distance_to_goal - distance_to_goal
-			reward += 8.0 * progress
+			reward += 15.0 * progress
 
-		
+		if action == 0:
+			heading_bonus = 0.2 * (1.0 - abs(relative_angle) / np.pi)
+			reward += heading_bonus
+			
 		if front < 0.20:
 			reward -= 1.0
 
