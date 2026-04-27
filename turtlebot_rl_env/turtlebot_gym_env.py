@@ -193,9 +193,7 @@ class TurtlebotGymEnv(gym.Env):
 		for _ in range(20):
 			rclpy.spin_once(self.node, timeout_sec=0.01)
 		
-		self.node.get_logger().info(
-			f"Robot position after reset: ({self.robot_x:.3f}, {self.robot_y:.3f})"
-		)
+
 		# step 4 - stop again after reset
 		self.cmd_vel_pub.publish(cmd)
 
@@ -334,7 +332,7 @@ class TurtlebotGymEnv(gym.Env):
 		if action == 0:
 			heading_bonus = 0.2 * (1.0 - abs(relative_angle) / np.pi)
 			reward += heading_bonus
-			
+
 		if front < 0.20:
 			reward -= 1.0
 
