@@ -149,11 +149,16 @@ class TurtlebotGymEnv(gym.Env):
 		# using same difficulty scale as goal picker
 		difficulty = min(self.episode_count / 2000.0, 1.0)
 
-		# arena bounds grow with difficulty (same logic as goal picker)
-		x_min_arena = 0.3
-		x_max_arena = min(0.3 + difficulty * 3.5, 3.8)
-		y_min_arena = max(-difficulty * 1.6, -1.6)
-		y_max_arena = min(difficulty * 2.6, 2.6)
+		# arena bounds grow with difficulty (matching actual arena boundaries)
+		x_min_arena = -1.5
+		x_max_arena = min(-1.5 + difficulty * 3.0, 1.5)
+		y_min_arena = max(-difficulty * 1.9, -1.9)
+		y_max_arena = min(difficulty * 1.9, 1.9)
+
+		# ensuring early episodes have reachable area
+		x_max_arena = max(x_max_arena, 0.0)
+		y_max_arena = max(y_max_arena, 0.5)
+
 
 		# minimum seperation distances
 		min_dist_between_cylinders = 0.6
@@ -247,13 +252,13 @@ class TurtlebotGymEnv(gym.Env):
 		# this was causing the reward drop after 250k steps in part 2 step 2
 		# arena boundaries grow with difficulty
 		
-		x_min = 0.5
-		x_max = min(0.5 + difficulty * 3.0, 3.5)  # hard cap at 3.5
-		y_min = max (-difficulty * 1.4, -1.4)     # hard cap at -1.4
-		y_max = min(difficulty * 2.4, 2.4) 		  # hard cap at 2.4      
+		x_min = -1.5
+		x_max = min(-1.5 + difficulty * 3.0, 1.5)  # hard cap at 3.5
+		y_min = max (-difficulty * 1.9, -1.9)     # hard cap at -1.4
+		y_max = min(difficulty * 1.9, 1.9) 		  # hard cap at 2.4      
 
 		# for earlier episodes to always have a reachable area
-		x_max = max(x_max, 1.5)
+		x_max = max(x_max, 0.0)
 		y_max = max(y_max, 0.5)
 
 		while True:
