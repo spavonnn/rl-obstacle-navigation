@@ -7,9 +7,13 @@ import random
 
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import Twist, Pose, Point, Quaternion 
 from std_srvs.srv import Empty
 from tf_transformations import euler_from_quaternion
+
+# Part 2 Step 3 - imports for moving obstacles
+from gazebo_msgs.srv import SetEntityState
+from gazebo_msgs.msg import EntityState
 
 
 class TurtlebotGymEnv(gym.Env):
@@ -57,6 +61,13 @@ class TurtlebotGymEnv(gym.Env):
 			"/reset_simulation"
 		)
 
+		# Part 2 Step 3 - service client for moving cylinders to random positions 
+		# /set_entity_state lets any model in Gazebo teleport to a new position
+		self.set_entity_client = self.node.create_client(
+			SetEntityState,
+			"/set_entity_state"
+		)
+
 		# robot pose values (in odometry frame)
 		self.robot_x   = 0.0
 		self.robot_y   = 0.0
@@ -75,6 +86,25 @@ class TurtlebotGymEnv(gym.Env):
 		# current goal - gets set randomly at the start of each episode in reset()
 		self.goal_x = 1.5
 		self.goal_y = 0.5
+
+
+		# Part 2 Step 3 - random obstacle positions
+		# cylinder names must match exactly what the world file calls them
+		# 9 cylinder obstacles defined in turtlebot3_world_part3.world
+		self.cylinder_names = [
+			"obstacle_0", "obstacle_1", "obstacle_2",
+			"obstacle_3", "obstacle_4", "obstacle_5",
+			"obstacle_6", "obstacle_7", "obstacle_8",
+		]
+
+		# current cylinder positions in odom frame
+		# begins at default grid positions and gets updated randomly each episode
+		self.cylinder_positions = [
+			(0.9, -0.6), (0.9, 0.5), (0.9, 1.6),
+			(2.0, -0.6), (2.0, 0.5), (2.0, 1.6),
+			(3.1, -0.6), (3.1, 0.5), (3.1, 1.6)
+		]
+
 
 		# lidar storage
 		self.lidar_ranges = None
@@ -96,8 +126,8 @@ class TurtlebotGymEnv(gym.Env):
 		# 3 = stop
 		self.action_space = gym.spaces.Discrete(4)
 
-		# observation space: 5 states
-		# [distance_to_goal, relative_angle, front, left, right]
+		# observation space: 10 values
+		# [distance_to_goal, relative_angle, front, front_left, left, back_left, back, back_right right, front_right]
 		self.observation_space = gym.spaces.Box(
 			low=-np.inf,
 			high=np.inf,
@@ -113,6 +143,93 @@ class TurtlebotGymEnv(gym.Env):
 		except:
 			self.episode_count = 0
 
+	# Part 2 Step 3 - randomly reposition all 9 cylinders in Gazebo
+	def _place_random_obstacles(self):
+
+		# using same difficulty scale as goal picker
+		difficulty = min(self.episode_count / 2000.0, 1.0)
+
+		# arena bounds grow with difficulty (same logic as goal picker)
+		x_min_arena = 0.3
+		x_max_arena = min(0.3 + difficulty * 3.5, 3.8)
+		y_min_arena = max(-difficulty * 1.6, -1.6)
+		y_max_arena = min(difficulty * 2.6, 2.6)
+
+		# minimum seperation distances
+		min_dist_between_cylinders = 0.6
+		min_dist_from_spawn = 0.8
+		min_dist_from_goal = 0.6
+
+		new_positions = []
+
+		for i in range(len(self.cylinder_names)):
+			placed = False
+			attempts = 0
+
+			while not placed and attempts < 1000:
+				attempts += 1
+				
+				cx = random.uniform(x_min_arena, x_max_arena)
+				cy = random.uniform(y_min_arena, y_max_arena)
+
+				# skip if too close to spawn
+				if np.sqrt(cx**2 + cy**2) < min_dist_from_spawn:
+					continue
+
+				# skip if too close to current goal
+				if np.sqrt((cx - self.goal_x)**2 + (cy - self.goal_y)**2) < min_dist_from_goal:
+					continue
+
+				# skip if too close to already placed cylinders this episode
+				too_close = False
+				for (px, py) in new_positions:
+					if np.sqrt((cx - px)**2 + (cy - py)**2) < min_dist_between_cylinders:
+						too_close = True
+						break
+				
+				if too_close:
+					continue
+ 
+				# passed all checks then use this position
+				new_positions.append((round(cx, 3), round(cy, 3)))
+				placed = True
+			
+			if not placed:
+				# fallback: keep old position if we ran out of attempts
+				new_positions.append(self.cylinder_positions[i])
+				self.node.get_logger().warn(
+					f"Could not place cylinder {i} after 1000 attempts — keeping old position"
+				)
+		
+		# update stored positions so _pick_random_goal avoids the new spots
+		self.cylinder_positions = new_positions
+ 
+		# teleport each cylinder in Gazebo to its new position
+		
+		self.set_entity_client.wait_for_service(timeout_sec=5.0)
+ 
+		for name, (ox, oy) in zip(self.cylinder_names, self.cylinder_positions):
+ 
+			# convert odom coordinates to Gazebo world frame
+			world_x = ox
+			world_y = oy
+ 
+			req                    = SetEntityState.Request()
+			req.state              = EntityState()
+			req.state.name         = name
+			req.state.pose         = Pose()
+			req.state.pose.position    = Point(x=world_x, y=world_y, z=0.25)
+			req.state.pose.orientation = Quaternion(x=0.0, y=0.0, z=0.0, w=1.0)
+			req.state.reference_frame  = "world"
+ 
+			future = self.set_entity_client.call_async(req)
+			while not future.done():
+				rclpy.spin_once(self.node, timeout_sec=0.05)
+ 
+		self.node.get_logger().info(
+			f"Placed {len(self.cylinder_names)} cylinders at new random positions "
+			f"[difficulty: {difficulty:.2f}]"
+		)
 
 
 	def _pick_random_goal(self):
@@ -122,21 +239,22 @@ class TurtlebotGymEnv(gym.Env):
 		# after 2000 episodes the full arena is unlocked and difficulty stays at 1.0
 		difficulty = min(self.episode_count / 2000.0, 1.0)
 
-		# arena boundaries grow with difficulty
-		# x_max has a minimum of 1.5 so early episodes always have a reachable goal area
-		# at difficulty 0.0: x goes 0.5 to 1.5 (close goals only)
-		# at difficulty 1.0: x goes 0.5 to 3.5 (full arena)
-		x_min = 0.5
-		x_max = max(1.5, 0.5 + difficulty * 3.0)  # minimum 1.5, grows to 3.5
-		y_min = -difficulty * 1.4                   # grows from 0.0 to -1.4
-		y_max =  max(0.5, difficulty * 2.4)         # minimum 0.5, grows to 2.4
 
-		# cylinder positions in odom frame
-		cylinders = [
-			(0.9, -0.6), (0.9, 0.5), (0.9, 1.6),
-			(2.0, -0.6), (2.0, 0.5), (2.0, 1.6),
-			(3.1, -0.6), (3.1, 0.5), (3.1, 1.6)
-		]
+
+		# BOUNDARY BUG FIX (from part 2 step 2)
+		# old code used max() which could push x_max beyoung the arena
+		# new code uses min() to hard cap at the actual arena boundary
+		# this was causing the reward drop after 250k steps in part 2 step 2
+		# arena boundaries grow with difficulty
+		
+		x_min = 0.5
+		x_max = min(0.5 + difficulty * 3.0, 3.5)  # hard cap at 3.5
+		y_min = max (-difficulty * 1.4, -1.4)     # hard cap at -1.4
+		y_max = min(difficulty * 2.4, 2.4) 		  # hard cap at 2.4      
+
+		# for earlier episodes to always have a reachable area
+		x_max = max(x_max, 1.5)
+		y_max = max(y_max, 0.5)
 
 		while True:
 			# pick a random x and y inside the current difficulty bounds
@@ -146,10 +264,13 @@ class TurtlebotGymEnv(gym.Env):
 			# skip if too close to spawn
 			if np.sqrt(x**2 + y**2) < 0.5:
 				continue
+			
 
-			# skip if too close to any cylinder
+			# Part 2 Step 3 - uses self.cylinder_positions (new random positions)
+			# instead of hardcoded positions so goal avoids the actual cylinder locations
+			
 			too_close = False
-			for cx, cy in cylinders:
+			for cx, cy in self.cylinder_positions:
 				if np.sqrt((x - cx)**2 + (y - cy)**2) < 0.5:
 					too_close = True
 					break
@@ -193,19 +314,24 @@ class TurtlebotGymEnv(gym.Env):
 		for _ in range(20):
 			rclpy.spin_once(self.node, timeout_sec=0.01)
 		
-
 		# step 4 - stop again after reset
 		self.cmd_vel_pub.publish(cmd)
 
-		# step 5 - pick a new random goal for this episode and visualize it
+
+		# Part 2 Step 3 - obstacles must be placed FIRST before goal is picked so the goal picker knows the cylinder positions and avoids them
+
+		# step 5 - move cylinders to new random positions
+		self._place_random_obstacles()
+
+		# step 6 - pick a new random goal for this episode 
 		self._pick_random_goal()
 
-		# step 6 - wait for a fresh LiDAR scan from the new spawn position
+		# step 7 - wait for a fresh LiDAR scan from the new configuration
 		self.new_scan = False
 		while not self.new_scan:
 			rclpy.spin_once(self.node, timeout_sec=0.01)
 
-		# step 7 - get first observation and return it
+		# step 8 - get first observation and return it
 		observation = self._get_obs()
 		self.prev_distance_to_goal = observation[0]
 
@@ -285,7 +411,7 @@ class TurtlebotGymEnv(gym.Env):
 			if collision:
 				self.node.get_logger().info("Episode ended due to COLLISION.")
 			elif goal_reached:
-				self.node.get_logger().info("Episode ended with GOAL REACHED!")
+				self.node.get_logger().info("Episode ended with GOAL REACHED.")
 			else:
 				self.node.get_logger().info("Episode ended due to MAX STEPS reached.")
 
@@ -332,7 +458,7 @@ class TurtlebotGymEnv(gym.Env):
 		if action == 0:
 			heading_bonus = 0.2 * (1.0 - abs(relative_angle) / np.pi)
 			reward += heading_bonus
-
+			
 		if front < 0.20:
 			reward -= 1.0
 
