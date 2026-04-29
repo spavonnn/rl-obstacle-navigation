@@ -8,7 +8,7 @@ from turtlebot_gym_env import TurtlebotGymEnv
 
 
 # number of episodes to run
-NUM_EPISODES = 10
+NUM_EPISODES = 20
 
 # create environment
 env = TurtlebotGymEnv()
