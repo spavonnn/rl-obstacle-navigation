@@ -291,7 +291,7 @@ class TurtlebotGymEnv(gym.Env):
 				with open("episode_count.txt", "w") as f:
 					f.write(str(self.episode_count))
 
-				self.node.get_logger().info(
+				self.node.get_logger().debug(
 					f"New random goal set to odom ({self.goal_x}, {self.goal_y}) [difficulty: {difficulty:.2f}]"
 				)
 				return
